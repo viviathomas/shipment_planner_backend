@@ -4,23 +4,23 @@ import com.vivia.shipment_planner.model.Shipment;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 @Service
 public class ShipmentHistoryService {
+
     private final List<Shipment> history = new ArrayList<>();
 
-    // Add new planned shipments to history
     public synchronized void addAll(List<Shipment> shipments) {
         if (shipments == null || shipments.isEmpty()) return;
         history.addAll(shipments);
     }
 
-    // Return copy so callers can't mutate internal list
     public synchronized List<Shipment> getAll() {
         return new ArrayList<>(history);
     }
 
-    public synchronized void clear() { history.clear(); }
+    public synchronized void clear() {
+        history.clear();
+    }
 }

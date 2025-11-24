@@ -13,33 +13,49 @@ public class RouteService {
     private final WeightedRouteOptimizer optimizer;
     private final OrderService orderService;
     private final LaneService laneService;
+    private final ShipmentHistoryService shipmentHistoryService;
 
-    public RouteService(WeightedRouteOptimizer optimizer, OrderService orderService, LaneService laneService) {
+    public RouteService(
+            WeightedRouteOptimizer optimizer,
+            OrderService orderService,
+            LaneService laneService,
+            ShipmentHistoryService shipmentHistoryService
+    ) {
         this.optimizer = optimizer;
         this.orderService = orderService;
         this.laneService = laneService;
+        this.shipmentHistoryService = shipmentHistoryService;
     }
 
     public RoutePlanResult planRoutes(RoutePlanRequest request) {
-        // If request provides order IDs -> filter, otherwise use all uploaded orders
-        List<Order> orders;
-        if (request.getOrders() == null || request.getOrders().isEmpty()) {
-            orders = orderService.getAllOrders();
-        } else {
-            orders = orderService.getOrders(request.getOrders());
+
+        // Fetch relevant orders
+        List<Order> orders = (request.getOrders() == null || request.getOrders().isEmpty())
+                ? orderService.getAllOrders()
+                : orderService.getOrders(request.getOrders());
+
+        if (orders.isEmpty()) {
+            throw new RuntimeException("No orders to plan.");
         }
 
-        if (orders == null || orders.isEmpty()) {
-            throw new RuntimeException("No orders to plan. Upload orders or send order IDs in request.");
-        }
-
-        Map<String, List<Order>> groups = groupOrdersByOD(orders);
-        return optimizer.planShipments(groups, laneService, request.getAlpha(), request.getBeta(), request.getGamma());
-    }
-
-    // helper
-    private Map<String, List<Order>> groupOrdersByOD(List<Order> orders) {
-        return orders.stream()
+        // Group by O|D (source-destination)
+        Map<String, List<Order>> grouped = orders.stream()
                 .collect(Collectors.groupingBy(o -> o.getSource() + "|" + o.getDestination()));
+
+        // Call optimizer — this returns both shipments + orphan orders
+        RoutePlanResult result = optimizer.planShipments(
+                grouped,
+                laneService,
+                request.getAlpha(),
+                request.getBeta(),
+                request.getGamma()
+        );
+
+        // Save successful shipments into history
+        if (result.getShipments() != null) {
+            shipmentHistoryService.addAll(result.getShipments());
+        }
+
+        return result;
     }
 }
