@@ -25,10 +25,6 @@ public class RouteController {
     public RoutePlanResult planRoute(@RequestBody RoutePlanRequest request) {
 
         RoutePlanResult result = routeService.planRoutes(request);
-
-        // save shipments to persistent history
-        history.addAll(result.getShipments());
-
         return result;
     }
 
