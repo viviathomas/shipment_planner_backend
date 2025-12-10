@@ -1,14 +1,11 @@
 package com.vivia.shipment_planner.service;
 
-import com.vivia.shipment_planner.model.Lane;
-import com.vivia.shipment_planner.model.Order;
-import com.vivia.shipment_planner.model.Shipment;
+import com.vivia.shipment_planner.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 @Service
 public class ShipmentPlannerService {
@@ -19,115 +16,107 @@ public class ShipmentPlannerService {
     private final AtomicInteger seq = new AtomicInteger(1);
 
     /**
-     * Plans shipments from a list of orders.
-     * Groups orders by OD, matches lanes, and packs orders respecting lane capacity.
+     * Builds MULTI-STOP shipments by chaining orders:
+     * Delhi → Hyderabad + Hyderabad → Chennai
+     * becomes ONE shipment with 3 stops
      */
     public List<Shipment> planShipments(List<Order> orders) {
-        List<Shipment> finalShipments = new ArrayList<>();
 
-        // Group orders by OD (source + destination)
-        Map<String, List<Order>> groupedOD = orders.stream()
-                .collect(Collectors.groupingBy(o ->
-                        o.getSource().trim().toUpperCase() + "||" +
-                                o.getDestination().trim().toUpperCase()
-                ));
+        List<Shipment> shipments = new ArrayList<>();
+        Set<String> used = new HashSet<>();
 
-        for (Map.Entry<String, List<Order>> entry : groupedOD.entrySet()) {
+        // sort to make chaining deterministic
+        orders.sort(Comparator.comparing(Order::getSource));
 
-            List<Order> odOrders = new ArrayList<>(entry.getValue());
-            String[] parts = entry.getKey().split("\\|\\|");
-            String source = parts[0];
-            String destination = parts[1];
+        for (Order start : orders) {
 
-            // Find all lanes matching this OD
-            List<Lane> lanes = laneService.getLanesForOD(source, destination);
+            if (used.contains(start.getOrderId())) continue;
 
-            if (lanes.isEmpty()) {
-                // No matching lane → put everything in UNASSIGNED
-                packOrders("UNASSIGNED-" + source + "-" + destination,
-                        odOrders, null, finalShipments);
-            } else {
-                // Try each lane one by one
-                List<Order> remaining = new ArrayList<>(odOrders);
+            List<Order> chain = new ArrayList<>();
+            chain.add(start);
+            used.add(start.getOrderId());
 
-                for (Lane lane : lanes) {
-                    Set<String> allowed = lane.getAllowedProductTypes()
-                            .stream().map(String::toUpperCase)
-                            .collect(Collectors.toSet());
+            String currentCity = start.getDestination();
+            double totalWeight = start.getWeight();
 
-                    List<Order> compatible = remaining.stream()
-                            .filter(o -> allowed.contains("ALL") ||
-                                    allowed.contains(o.getProductType().toUpperCase()))
-                            .collect(Collectors.toList());
+            boolean extended = true;
 
-                    if (compatible.isEmpty()) continue;
+            while (extended) {
+                extended = false;
 
-                    remaining.removeAll(compatible);
+                for (Order next : orders) {
+                    if (used.contains(next.getOrderId())) continue;
 
-                    // Pack by lane capacity
-                    packOrders(lane.getLaneId(), compatible, lane, finalShipments);
+                    if (next.getSource().equalsIgnoreCase(currentCity)
+                            && totalWeight + next.getWeight() <= 3000) {
+
+                        chain.add(next);
+                        used.add(next.getOrderId());
+                        totalWeight += next.getWeight();
+                        currentCity = next.getDestination();
+                        extended = true;
+                        break;
+                    }
                 }
+            }
 
-                // Any order left → UNASSIGNED
-                if (!remaining.isEmpty()) {
-                    packOrders("UNASSIGNED-" + source + "-" + destination,
-                            remaining, null, finalShipments);
-                }
+            // 🔴 ONLY build shipment if we have real chaining
+            if (chain.size() >= 2) {
+                shipments.add(buildMultiStopShipment(chain));
             }
         }
 
-        return finalShipments;
+        return shipments;
     }
 
     /**
-     * Packs orders into shipments respecting weight capacity using First-Fit Decreasing
+     * Converts chained orders into a SINGLE multi-stop shipment
      */
-    private void packOrders(String laneId, List<Order> orders, Lane lane, List<Shipment> output) {
-        if (orders == null || orders.isEmpty()) return;
+    private Shipment buildMultiStopShipment(List<Order> chain) {
 
-        orders.sort(Comparator.comparingDouble(Order::getWeight).reversed());
+        Shipment shipment = new Shipment();
+        shipment.setShipmentId("SHP-" + System.currentTimeMillis() + "-" + seq.getAndIncrement());
+        shipment.setAssignedOrders(chain);
 
-        double maxCap = (lane == null) ? Double.MAX_VALUE : lane.getCapacity();
-        List<Shipment> active = new ArrayList<>();
+        List<Stop> stops = new ArrayList<>();
 
-        for (Order o : orders) {
-            boolean placed = false;
+        // Pickup
+        stops.add(new Stop(chain.get(0).getSource(), null, null));
 
-            for (Shipment s : active) {
-                double currentWeight = s.getAssignedOrders().stream()
-                        .mapToDouble(Order::getWeight).sum();
-
-                if (currentWeight + o.getWeight() <= maxCap) {
-                    s.getAssignedOrders().add(o);
-                    placed = true;
-                    break;
-                }
-            }
-
-            if (!placed) {
-                Shipment shipment = new Shipment();
-                shipment.setShipmentId("SHP-" + seq.getAndIncrement());
-                shipment.setLaneId(laneId);
-                shipment.setPickup(o.getSource());
-                shipment.setDelivery(o.getDestination());
-                shipment.setAssignedOrders(new ArrayList<>(List.of(o)));
-
-                if (lane != null) {
-                    shipment.setDistance(lane.getDistance());
-                    shipment.setEta(lane.getEstimatedTime());
-                    shipment.setLaneCost(lane.getBaseCost());
-                    shipment.setLaneEmission(lane.getEmission());
-                } else {
-                    shipment.setDistance(0);
-                    shipment.setEta(0);
-                    shipment.setLaneCost(0);
-                    shipment.setLaneEmission(0);
-                }
-
-                active.add(shipment);
-            }
+        // Intermediate stops (destinations except final)
+        for (int i = 0; i < chain.size() - 1; i++) {
+            stops.add(new Stop(chain.get(i).getDestination(), null, null));
         }
 
-        output.addAll(active);
+        // Final delivery
+        stops.add(new Stop(chain.get(chain.size() - 1).getDestination(), null, null));
+
+        shipment.setStops(stops);
+        shipment.setPickup(stops.get(0).getLocation());
+        shipment.setDelivery(stops.get(stops.size() - 1).getLocation());
+
+        double totalWeight = chain.stream()
+                .mapToDouble(Order::getWeight)
+                .sum();
+
+        Set<String> products = new HashSet<>();
+        chain.forEach(o -> products.add(o.getProductType().toUpperCase()));
+
+        laneService.findBestLaneForMoveStops(
+                shipment.getPickup(),
+                shipment.getDelivery(),
+                stops.size(),
+                totalWeight,
+                products
+        ).ifPresent(lane -> {
+            shipment.setLaneId(lane.getLaneId());
+            shipment.setDistance(lane.getDistance());
+            shipment.setEta(lane.getEstimatedTime());
+            shipment.setCost(lane.getBaseCost());
+            shipment.setLaneCost(lane.getBaseCost());
+            shipment.setLaneEmission(lane.getEmission());
+        });
+
+        return shipment;
     }
 }

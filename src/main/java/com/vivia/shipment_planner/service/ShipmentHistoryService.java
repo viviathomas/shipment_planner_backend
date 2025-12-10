@@ -11,12 +11,15 @@ public class ShipmentHistoryService {
 
     private final List<Shipment> history = new ArrayList<>();
 
-    public synchronized void addAll(List<Shipment> shipments) {
-        if (shipments == null || shipments.isEmpty()) return;
+    public void addAll(List<Shipment> shipments) {
         history.addAll(shipments);
     }
 
-    public synchronized List<Shipment> getAll() {
+    public List<Shipment> getAllForMoveStops() {
+        return history;
+    }
+
+    public synchronized List<Shipment> getAll(){
         return new ArrayList<>(history);
     }
 

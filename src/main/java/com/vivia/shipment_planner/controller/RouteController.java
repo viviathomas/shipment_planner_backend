@@ -14,18 +14,17 @@ import java.util.List;
 public class RouteController {
 
     private final RouteService routeService;
+
     private final ShipmentHistoryService history;
 
-    public RouteController(RouteService routeService, ShipmentHistoryService history) {
+    public RouteController(RouteService routeService,ShipmentHistoryService history) {
         this.routeService = routeService;
-        this.history = history;
+        this.history= history;
+
     }
-
     @PostMapping("/plan")
-    public RoutePlanResult planRoute(@RequestBody RoutePlanRequest request) {
-
-        RoutePlanResult result = routeService.planRoutes(request);
-        return result;
+    public RoutePlanResult plan(@RequestBody RoutePlanRequest request) {
+        return routeService.planRoutes(request);
     }
 
     @GetMapping("/history")

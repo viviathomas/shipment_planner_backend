@@ -11,7 +11,8 @@ public class Lane {
     private double estimatedTime;
     private double emission;
     private double capacity; // total capacity (kg)
-    private Set<String> allowedProductTypes; // e.g. {"Electronics","Perishables"} or {"ALL"}
+    private Set<String> allowedProductTypes;
+    private int maxStops;
 
     // getters / setters
     public String getLaneId() { return laneId; }
@@ -32,4 +33,12 @@ public class Lane {
     public void setCapacity(double capacity) { this.capacity = capacity; }
     public Set<String> getAllowedProductTypes() { return allowedProductTypes; }
     public void setAllowedProductTypes(Set<String> allowedProductTypes) { this.allowedProductTypes = allowedProductTypes; }
+    public int getMaxStops() {
+        return maxStops;
+    }
+
+    public void setMaxStops(int maxStops) {
+        this.maxStops = maxStops;
+    }
+
 }

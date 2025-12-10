@@ -15,34 +15,15 @@ public class LaneService {
 
     public LaneService() {
         try {
-            // Load lanes.csv from src/main/resources
             loadFromClasspathCsv("lanes.csv");
-            System.out.println("✅ Loaded lanes from resources: " + lanes.size());
+            System.out.println("✅ Loaded lanes: " + lanes.size());
         } catch (Exception e) {
-            System.out.println("⚠ Warning: Could not load lanes.csv from resources. Using fallback.");
-        }
-
-        // Fallback if nothing loaded
-        if (lanes.isEmpty()) {
-            Lane l1 = new Lane();
-            l1.setLaneId("LN-PUNE-HYD-01");
-            l1.setSource("Pune");
-            l1.setDestination("Hyderabad");
-            l1.setBaseCost(550.0);
-            l1.setDistance(140.0);
-            l1.setEstimatedTime(3.5);
-            l1.setEmission(45.0);
-            l1.setCapacity(500.0);
-            l1.setAllowedProductTypes(new HashSet<>(Arrays.asList("ECOMMERCE", "GENERAL", "ELECTRONICS")));
-
-            lanes.add(l1);
-            System.out.println("⚠ Using fallback lane: LN-PUNE-HYD-01");
+            System.out.println("⚠ Failed to load lanes.csv, using fallback");
+            createFallbackLane();
         }
     }
 
-    // -----------------------------
-    //      GETTERS
-    // -----------------------------
+    // ---------------- BASIC APIs ----------------
 
     public List<Lane> getAllLanes() {
         return Collections.unmodifiableList(lanes);
@@ -50,56 +31,88 @@ public class LaneService {
 
     public List<Lane> getLanesForOD(String source, String destination) {
         return lanes.stream()
-                .filter(l -> l.getSource().equalsIgnoreCase(source)
-                        && l.getDestination().equalsIgnoreCase(destination))
+                .filter(l -> l.getSource().equalsIgnoreCase(source))
+                .filter(l -> l.getDestination().equalsIgnoreCase(destination))
                 .collect(Collectors.toList());
     }
 
-    // -----------------------------
-    //      CSV LOADER
-    // -----------------------------
+    // ---------------- MOVE STOPS SUPPORT ----------------
+
+    public Optional<Lane> findBestLaneForMoveStops(
+            String source,
+            String destination,
+            int stopCount,
+            double totalWeight,
+            Set<String> productTypes
+    ) {
+        return lanes.stream()
+                .filter(l -> l.getSource().equalsIgnoreCase(source))
+                .filter(l -> l.getDestination().equalsIgnoreCase(destination))
+                .filter(l -> l.getMaxStops() >= stopCount)
+                .filter(l -> l.getCapacity() >= totalWeight)
+                .filter(l ->
+                        l.getAllowedProductTypes().contains("ALL") ||
+                                productTypes.stream().anyMatch(p -> l.getAllowedProductTypes().contains(p))
+                )
+                .min(Comparator.comparingDouble(Lane::getBaseCost));
+    }
+
+    // ---------------- CSV LOADER ----------------
 
     private void loadFromClasspathCsv(String filename) throws Exception {
-        ClassLoader classLoader = getClass().getClassLoader();
 
-        if (classLoader.getResourceAsStream(filename) == null) {
-            throw new RuntimeException("lanes.csv not found in resources");
+        ClassLoader cl = getClass().getClassLoader();
+        if (cl.getResourceAsStream(filename) == null) {
+            throw new RuntimeException("lanes.csv not found");
         }
 
         try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(classLoader.getResourceAsStream(filename)))) {
+                new InputStreamReader(cl.getResourceAsStream(filename)))) {
 
-            String header = br.readLine(); // skip header
-            if (header == null) return;
+            br.readLine(); // skip header
 
             String line;
             while ((line = br.readLine()) != null) {
-                String[] cols = line.split(",", -1);
-                if (cols.length < 9) continue;
+                String[] c = line.split(",", -1);
+                if (c.length < 10) continue;
 
-                Lane lane = new Lane();
-                lane.setLaneId(cols[0].trim());
-                lane.setSource(cols[1].trim());
-                lane.setDestination(cols[2].trim());
-                lane.setBaseCost(Double.parseDouble(cols[3].trim()));
-                lane.setDistance(Double.parseDouble(cols[4].trim()));
-                lane.setEstimatedTime(Double.parseDouble(cols[5].trim()));
-                lane.setEmission(Double.parseDouble(cols[6].trim()));
-                lane.setCapacity(Double.parseDouble(cols[7].trim()));
+                Lane l = new Lane();
+                l.setLaneId(c[0].trim());
+                l.setSource(c[1].trim());
+                l.setDestination(c[2].trim());
+                l.setBaseCost(Double.parseDouble(c[3]));
+                l.setDistance(Double.parseDouble(c[4]));
+                l.setEstimatedTime(Double.parseDouble(c[5]));
+                l.setEmission(Double.parseDouble(c[6]));
+                l.setCapacity(Double.parseDouble(c[7]));
+                l.setMaxStops(Integer.parseInt(c[8]));
 
-                // Allowed products
-                Set<String> allowed = Arrays.stream(cols[8].split(";"))
+                Set<String> products = Arrays.stream(c[9].split(";"))
                         .map(String::trim)
                         .map(String::toUpperCase)
                         .filter(s -> !s.isEmpty())
                         .collect(Collectors.toSet());
 
-                if (allowed.isEmpty()) allowed.add("ALL");
+                if (products.isEmpty()) products.add("ALL");
+                l.setAllowedProductTypes(products);
 
-                lane.setAllowedProductTypes(allowed);
-
-                lanes.add(lane);
+                lanes.add(l);
             }
         }
+    }
+
+    private void createFallbackLane() {
+        Lane l = new Lane();
+        l.setLaneId("LN-FALLBACK-01");
+        l.setSource("Delhi");
+        l.setDestination("Chennai");
+        l.setBaseCost(7000);
+        l.setDistance(950);
+        l.setEstimatedTime(18);
+        l.setEmission(550);
+        l.setCapacity(1500);
+        l.setMaxStops(5);
+        l.setAllowedProductTypes(Set.of("ALL"));
+        lanes.add(l);
     }
 }

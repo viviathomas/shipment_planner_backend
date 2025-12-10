@@ -38,4 +38,5 @@ public class Shipment {
     public void setLaneEmission(double laneEmission) { this.laneEmission = laneEmission; }
     public List<Stop> getStops() { return stops; }
     public void setStops(List<Stop> stops) { this.stops = stops; }
+
 }
