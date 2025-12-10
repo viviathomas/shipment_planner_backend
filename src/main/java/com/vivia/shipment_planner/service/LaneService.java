@@ -40,9 +40,6 @@ public class LaneService {
         }
     }
 
-    // -----------------------------
-    //      GETTERS
-    // -----------------------------
 
     public List<Lane> getAllLanes() {
         return Collections.unmodifiableList(lanes);
@@ -55,9 +52,6 @@ public class LaneService {
                 .collect(Collectors.toList());
     }
 
-    // -----------------------------
-    //      CSV LOADER
-    // -----------------------------
 
     private void loadFromClasspathCsv(String filename) throws Exception {
         ClassLoader classLoader = getClass().getClassLoader();

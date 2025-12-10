@@ -1,6 +1,7 @@
 package com.vivia.shipment_planner.service;
 
 import com.vivia.shipment_planner.model.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -8,13 +9,16 @@ import java.util.stream.Collectors;
 
 @Service
 public class WeightedRouteOptimizer {
+    @Autowired
+    private OptimizationSettingsService optimizationSettingsService;
 
-    // score function: lower is better
+    @Autowired
+    OrderService orderService;
+
     private double computeScore(Lane lane, double alpha, double beta, double gamma) {
         return alpha * lane.getDistance() + beta * lane.getBaseCost() + gamma * lane.getEmission();
     }
 
-    // check lane feasibility: capacity + product type compatibility
     private boolean isFeasible(Lane lane, List<Order> orders, List<String> reasons) {
         double totalWeight = orders.stream().mapToDouble(Order::getWeight).sum();
         if (totalWeight > lane.getCapacity()) {
@@ -52,15 +56,20 @@ public class WeightedRouteOptimizer {
         return best;
     }
 
-    // main entry: groups are OD -> list of orders
     public RoutePlanResult planShipments(Map<String, List<Order>> groups,
-                                         LaneService laneService,
-                                         double alpha, double beta, double gamma) {
+                                         LaneService laneService) {
+
+        // 🔥 Pull dynamic weights from backend
+        OptimizationSettings w = optimizationSettingsService.getSettings();
+        double alpha = w.getDistanceWeight();
+        double beta  = w.getCostWeight();
+        double gamma = w.getEmissionWeight();
 
         List<Shipment> shipments = new ArrayList<>();
         List<OrphanOrder> orphans = new ArrayList<>();
 
         for (Map.Entry<String, List<Order>> e : groups.entrySet()) {
+
             String odKey = e.getKey();
             String[] parts = odKey.split("\\|");
             String source = parts[0];
@@ -68,15 +77,13 @@ public class WeightedRouteOptimizer {
             List<Order> orders = e.getValue();
 
             List<Lane> candidates = laneService.getLanesForOD(source, destination);
+
             if (candidates.isEmpty()) {
-                // no lanes: mark all orders orphaned for this OD
                 for (Order o : orders) {
-                    OrphanOrder or = new OrphanOrder();
-                    or.setOrderId(o.getOrderId());
-                    or.setSource(o.getSource());
-                    or.setDestination(o.getDestination());
-                    or.setReason("No lane configured for " + source + " -> " + destination);
-                    orphans.add(or);
+                    OrphanOrder orphan = new OrphanOrder();
+                    orphan.setOrder(o);
+                    orphan.setSuggestedLanes(new ArrayList<>());
+                    orphans.add(orphan);
                 }
                 continue;
             }
@@ -85,33 +92,47 @@ public class WeightedRouteOptimizer {
             Lane chosen = chooseBestLane(candidates, orders, alpha, beta, gamma, reasons);
 
             if (chosen == null) {
-                // try to split: attempt to plan each order individually (fallback)
                 for (Order o : orders) {
-                    List<Order> single = Collections.singletonList(o);
+                    List<Order> singleOrderList = Collections.singletonList(o);
                     List<String> r2 = new ArrayList<>();
-                    Lane chosenSingle = chooseBestLane(candidates, single, alpha, beta, gamma, r2);
+
+                    Lane chosenSingle = chooseBestLane(candidates, singleOrderList, alpha, beta, gamma, r2);
+
                     if (chosenSingle != null) {
-                        shipments.add(buildShipment(chosenSingle, source, destination, single));
+                        shipments.add(buildShipment(chosenSingle, source, destination, singleOrderList));
                     } else {
-                        OrphanOrder or = new OrphanOrder();
-                        or.setOrderId(o.getOrderId());
-                        or.setSource(o.getSource());
-                        or.setDestination(o.getDestination());
-                        or.setReason(String.join("; ", r2.isEmpty() ? reasons : r2));
-                        orphans.add(or);
+
+                        OrphanOrder orphan = new OrphanOrder();
+                        orphan.setOrder(o);
+
+                        List<OrphanOrder.SuggestedLane> suggestions = new ArrayList<>();
+                        for (Lane lane : candidates) {
+                            OrphanOrder.SuggestedLane s = new OrphanOrder.SuggestedLane(
+                                    lane,
+                                    20,
+                                    String.join("; ", r2.isEmpty() ? reasons : r2)
+                            );
+                            suggestions.add(s);
+                        }
+
+                        orphan.setSuggestedLanes(suggestions);
+                        orphans.add(orphan);
                     }
                 }
+
             } else {
-                // chosen lane can handle all orders in group
                 shipments.add(buildShipment(chosen, source, destination, orders));
             }
         }
+
+        orderService.setOrphans(orphans);
 
         RoutePlanResult result = new RoutePlanResult();
         result.setShipments(shipments);
         result.setOrphanOrders(orphans);
         return result;
     }
+
 
     private Shipment buildShipment(Lane lane, String pickup, String delivery, List<Order> assigned) {
         Shipment s = new Shipment();

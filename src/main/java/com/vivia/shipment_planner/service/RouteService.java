@@ -29,7 +29,7 @@ public class RouteService {
 
     public RoutePlanResult planRoutes(RoutePlanRequest request) {
 
-        // Fetch relevant orders
+
         List<Order> orders = (request.getOrders() == null || request.getOrders().isEmpty())
                 ? orderService.getAllOrders()
                 : orderService.getOrders(request.getOrders());
@@ -38,18 +38,16 @@ public class RouteService {
             throw new RuntimeException("No orders to plan.");
         }
 
-        // Group by O|D (source-destination)
+
         Map<String, List<Order>> grouped = orders.stream()
                 .collect(Collectors.groupingBy(o -> o.getSource() + "|" + o.getDestination()));
 
-        // Call optimizer — this returns both shipments + orphan orders
+
         RoutePlanResult result = optimizer.planShipments(
                 grouped,
-                laneService,
-                request.getAlpha(),
-                request.getBeta(),
-                request.getGamma()
+                laneService
         );
+
 
         // Save successful shipments into history
         if (result.getShipments() != null) {

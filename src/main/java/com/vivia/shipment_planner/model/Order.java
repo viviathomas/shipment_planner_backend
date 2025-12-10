@@ -8,6 +8,7 @@ public class Order {
     private String destination;
     private String productType;
     private double weight;
+    private String assignedLaneId; // ⭐ NEW FIELD
 
     public String getOrderId() {
         return orderId;
@@ -49,6 +50,16 @@ public class Order {
         this.weight = weight;
     }
 
+    // ⭐ NEW GETTER/SETTER
+    public String getAssignedLaneId() {
+        return assignedLaneId;
+    }
+
+    public void setAssignedLaneId(String assignedLaneId) {
+        this.assignedLaneId = assignedLaneId;
+    }
+
+    // Keep your existing Shipment inner class below
     public static class Shipment {
         private String shipmentId;
         private String pickup;
@@ -124,4 +135,3 @@ public class Order {
         }
     }
 }
-

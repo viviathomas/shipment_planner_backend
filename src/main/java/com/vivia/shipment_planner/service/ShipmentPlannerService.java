@@ -79,9 +79,7 @@ public class ShipmentPlannerService {
         return finalShipments;
     }
 
-    /**
-     * Packs orders into shipments respecting weight capacity using First-Fit Decreasing
-     */
+
     private void packOrders(String laneId, List<Order> orders, Lane lane, List<Shipment> output) {
         if (orders == null || orders.isEmpty()) return;
 
